@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XVA counterparty table — prototype</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#fff; --rail:#fafbfc; --ink:#111827; --muted:#6b7280;
+    --line:#e6e8ec; --line2:#d7dbe2;
+    --accent:#2563eb; --accent-soft:#eff5ff; --accent-line:#bfdbfe;
+    --good:#047857; --bad:#b91c1c; --warn:#b45309; --warn-soft:#fffbeb; --warn-line:#fde68a;
+    --hover:#f3f4f6; --sel:#eaf2ff; --zebra:#fcfcfd;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --shadow:0 12px 32px rgba(15,23,42,.14), 0 2px 6px rgba(15,23,42,.06);
+    --rowh:34px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#080c16; --panel:#111726; --rail:#0d1320; --ink:#e5e9f0; --muted:#94a3b8;
+      --line:#212c44; --line2:#2c3a58;
+      --accent:#60a5fa; --accent-soft:#16223a; --accent-line:#2f4a76;
+      --good:#34d399; --bad:#f87171; --warn:#fbbf24; --warn-soft:#2a2210; --warn-line:#5c4a12;
+      --hover:#182034; --sel:#16223a; --zebra:#0f1524;
+      --shadow:0 14px 40px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  button,input,select{font:inherit;color:inherit}
+
+  /* ================= shell ================= */
+  .app{display:flex;height:100vh}
+  .rail{flex:0 0 auto;width:288px;background:var(--rail);overflow:hidden;
+    transition:width .18s ease,opacity .18s ease}
+  .rail.left{border-right:1px solid var(--line)}
+  .rail.right{border-left:1px solid var(--line);width:344px}
+  .rail.closed{width:0;opacity:0}
+  .rail-inner{width:288px;height:100%;overflow-y:auto;padding:16px 16px 40px}
+  .rail.right .rail-inner{width:344px}
+  .workbench{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel)}
+
+  /* ================= toolbar ================= */
+  .tbar{border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+  .trow{display:flex;align-items:center;gap:8px;padding:9px 12px;flex-wrap:wrap}
+  .trow + .trow{border-top:1px solid var(--line)}
+
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{border:0;background:transparent;padding:5px 11px;cursor:pointer;font-size:12.5px;color:var(--muted)}
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button:hover{background:var(--hover);color:var(--ink)}
+  .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:6px 11px;
+    border-radius:9px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+  .btn:hover{border-color:var(--accent-line);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.08);color:#fff}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--muted);padding:6px 8px}
+  .btn.ghost:hover{background:var(--hover)}
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn:disabled:hover{border-color:var(--line);color:var(--ink)}
+
+  .searchbox{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);
+    border-radius:9px;background:var(--panel);flex:0 1 210px;min-width:120px}
+  .searchbox:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .searchbox input{flex:1;border:0;outline:0;background:transparent;min-width:0}
+  .searchbox svg{color:var(--muted);flex:none}
+
+  select{appearance:none;border:1px solid var(--line);background:var(--panel);border-radius:9px;
+    padding:6px 26px 6px 10px;font-size:12.5px;cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='3' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat;background-position:right 8px center}
+  .grow{flex:1}
+  .count{font-size:12px;color:var(--muted);white-space:nowrap}
+  .dotactive{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px}
+
+  /* ---------- popover ---------- */
+  .popwrap{position:relative}
+  .pop{position:absolute;z-index:40;top:calc(100% + 6px);right:0;width:330px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+  .pop .phead{padding:9px 11px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  .pop .phead input{flex:1;border:0;outline:0;background:transparent;min-width:0}
+  .pop .plist{max-height:320px;overflow-y:auto;padding:6px}
+  .pop .pfoot{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line);background:var(--bg)}
+  .colrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;user-select:none}
+  .colrow:hover{background:var(--hover)}
+  .colrow.dragging{opacity:.4}
+  .colrow.over{box-shadow:inset 0 2px 0 var(--accent)}
+  .colrow .grip{color:var(--muted);cursor:grab;flex:none;font-size:12px;letter-spacing:-2px}
+  .colrow .ctitle{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .colrow .kind{font-size:10px;color:var(--muted);font:10px var(--mono);flex:none}
+  .tick{width:15px;height:15px;border-radius:4px;border:1.5px solid #c4c9d4;flex:none;display:grid;place-items:center}
+  @media (prefers-color-scheme: dark){.tick{border-color:#4b5776}}
+  .tick[data-s="on"]{background:var(--accent);border-color:var(--accent)}
+  .tick[data-s="on"]::after{content:"";width:8px;height:4px;border-left:2px solid #fff;border-bottom:2px solid #fff;
+    transform:rotate(-45deg) translate(1px,-1px)}
+  .pinbtn{flex:none;border:0;background:transparent;cursor:pointer;color:var(--muted);padding:2px 4px;border-radius:5px;font-size:11px}
+  .pinbtn:hover{background:var(--hover);color:var(--ink)}
+  .pinbtn[data-on="1"]{color:var(--accent)}
+
+  /* ---------- date picker ---------- */
+  .pop.dp{left:0;right:auto;width:auto}
+  .dpgrid{display:flex}
+  .presets{width:162px;border-right:1px solid var(--line);padding:10px;background:var(--bg)}
+  .ptitle{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px 2px}
+  .preset{display:block;width:100%;text-align:left;border:1px solid transparent;background:transparent;
+    padding:6px 8px;border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--ink);margin-bottom:3px}
+  .preset:hover{background:var(--hover);border-color:var(--line)}
+  .preset[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent-line);
+    color:var(--accent);font-weight:600}
+  .calwrap{padding:10px 12px}
+  .calhead{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .calmonth{flex:1;text-align:center;font-weight:600;font-size:13px}
+  .navbtn{border:1px solid var(--line);background:var(--panel);border-radius:8px;width:26px;height:26px;
+    cursor:pointer;line-height:1;color:var(--muted);font-size:15px;padding:0}
+  .navbtn:hover:not(:disabled){color:var(--accent);border-color:var(--accent-line)}
+  .navbtn:disabled{opacity:.3;cursor:default}
+  .caldow,.calgrid{display:grid;grid-template-columns:repeat(7,32px);gap:2px}
+  .caldow span{text-align:center;font-size:10px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.04em;padding-bottom:5px}
+  .day{height:30px;border:1px solid transparent;background:transparent;border-radius:8px;cursor:pointer;
+    font-size:12.5px;color:var(--ink);font-variant-numeric:tabular-nums;padding:0}
+  .day:hover:not(:disabled){background:var(--hover);border-color:var(--line)}
+  .day.off{color:var(--muted);opacity:.4;cursor:not-allowed}
+  .day.today{border-color:var(--accent-line);font-weight:700}
+  .day.sel{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .day.focus{box-shadow:inset 0 0 0 2px var(--accent)}
+  .day.pad{visibility:hidden}
+  #dpRoot:focus{outline:none}
+  .dpfoot{display:flex;align-items:center;gap:8px;padding:8px 11px;border-top:1px solid var(--line);
+    background:var(--panel);font-size:11px;color:var(--muted)}
+  .legend{display:inline-flex;align-items:center;gap:4px;margin-right:9px;white-space:nowrap}
+  .legend i{width:8px;height:8px;border-radius:2px;display:inline-block;border:1px solid var(--line)}
+  .datebtn .k{color:var(--muted);font-weight:400}
+  .datebtn b{font-weight:600}
+
+  /* ================= table ================= */
+  .tablescroll{flex:1;overflow:auto;position:relative}
+  table{border-collapse:separate;border-spacing:0;table-layout:fixed;font-variant-numeric:tabular-nums}
+  thead th{
+    position:sticky;top:0;z-index:2;background:var(--panel);
+    border-bottom:1px solid var(--line2);text-align:left;font-weight:600;font-size:11.5px;
+    color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+    padding:0 10px;height:34px;white-space:nowrap;cursor:pointer;user-select:none;
+  }
+  thead th:hover{color:var(--ink);background:var(--hover)}
+  thead th .sortmark{color:var(--accent);margin-left:4px;font-size:10px}
+  thead th.num{text-align:right}
+  thead th.pin{z-index:4;background:var(--panel);border-right:1px solid var(--line)}
+  thead th.pin:hover{background:var(--hover)}
+
+  tbody td{
+    padding:0 10px;height:var(--rowh);border-bottom:1px solid var(--line);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--panel);
+  }
+  tbody td.num{text-align:right;font-family:var(--mono);font-size:12px}
+  tbody tr:nth-child(even) td{background:var(--zebra)}
+  tbody tr:hover td{background:var(--hover)}
+  tbody tr.sel td{background:var(--sel)}
+  tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  tbody td.pin{border-right:1px solid var(--line);box-shadow:4px 0 6px -6px rgba(0,0,0,.35)}
+  tbody td.pin.lead{font-weight:600}
+  tbody td.pos{color:var(--good)}
+  tbody td.neg{color:var(--bad)}
+
+  .pos{color:var(--good)} .neg{color:var(--bad)}
+  .mut{color:var(--muted)}
+
+  .cellbar{position:relative;display:block;height:100%;line-height:var(--rowh)}
+  .cellbar .fill{position:absolute;left:-10px;top:6px;bottom:6px;border-radius:3px;
+    background:var(--accent-soft);opacity:.85;z-index:0}
+  .cellbar .v{position:relative;z-index:1}
+
+  .chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;
+    border:1px solid var(--line);background:var(--bg);color:var(--muted)}
+  .chip.rate{font-family:var(--mono);color:var(--ink)}
+  .chip.alert{border-color:var(--warn-line);background:var(--warn-soft);color:var(--warn)}
+
+  tfoot td{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line2);
+    padding:0 10px;height:32px;font-weight:600;font-size:12px;white-space:nowrap;font-family:var(--mono)}
+  tfoot td.num{text-align:right}
+  tfoot td.pin{background:var(--bg);border-right:1px solid var(--line);z-index:3}
+  tfoot td.label{font-family:inherit;text-transform:uppercase;font-size:11px;letter-spacing:.04em;color:var(--muted)}
+
+  .empty{padding:60px 20px;text-align:center;color:var(--muted)}
+  .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:6px}
+
+  /* ================= status bar ================= */
+  .sbar{flex:none;display:flex;align-items:center;gap:14px;padding:6px 12px;
+    border-top:1px solid var(--line);background:var(--bg);font-size:11.5px;color:var(--muted)}
+  .sbar kbd{font:10px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 4px;background:var(--panel)}
+
+  /* ================= rails content ================= */
+  .rh{display:flex;align-items:center;gap:8px;margin:0 0 12px}
+  .rh h2{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0;flex:1}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px;margin-bottom:12px}
+  .card h3{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 9px}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:12.5px}
+  .kv + .kv{border-top:1px dashed var(--line)}
+  .kv .k{color:var(--muted)}
+  .kv .v{font-weight:600;text-align:right}
+  .def{padding:7px 0;font-size:12px}
+  .def + .def{border-top:1px dashed var(--line)}
+  .def .t{font-weight:600;display:flex;justify-content:space-between;gap:8px}
+  .def .d{color:var(--muted);margin-top:2px;line-height:1.45}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;
+    border:1px solid var(--line);background:var(--bg);color:var(--muted);margin:0 4px 4px 0}
+  .badge.ok{border-color:#a7f3d0;background:#ecfdf5;color:var(--good)}
+  .badge.warn{border-color:var(--warn-line);background:var(--warn-soft);color:var(--warn)}
+  @media (prefers-color-scheme: dark){
+    .badge.ok{border-color:#134e3a;background:#0c2b21}
+    .badge.warn{border-color:var(--warn-line);background:var(--warn-soft)}
+  }
+  .filt{display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 8px;border-radius:8px;background:var(--bg);border:1px solid var(--line);margin-bottom:6px}
+  .filt .x{margin-left:auto;border:0;background:transparent;cursor:pointer;color:var(--muted);padding:0 2px}
+  .filt .x:hover{color:var(--bad)}
+
+  /* ---------- detail rail ---------- */
+  .dhead{padding:0 0 12px;border-bottom:1px solid var(--line);margin-bottom:12px}
+  .dname{font-size:16px;font-weight:650;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
+  .dmeta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .big{display:flex;align-items:baseline;gap:10px;margin-top:12px}
+  .big .n{font-size:26px;font-weight:650;font-family:var(--mono);letter-spacing:-.02em}
+  .big .u{font-size:12px;color:var(--muted)}
+  .delta{font-size:12.5px;font-weight:600;padding:2px 7px;border-radius:7px}
+  .delta.up{background:#fef2f2;color:var(--bad)}
+  .delta.dn{background:#ecfdf5;color:var(--good)}
+  @media (prefers-color-scheme: dark){
+    .delta.up{background:#331515}.delta.dn{background:#0c2b21}
+  }
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px}
+  .tabs button{border:0;background:transparent;padding:7px 10px;cursor:pointer;color:var(--muted);
+    font-size:12.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button:hover{color:var(--ink)}
+  .tabs button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .metrics div{background:var(--panel);padding:9px 10px}
+  .metrics .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .metrics .v{font-family:var(--mono);font-size:14px;font-weight:600;margin-top:3px}
+  .attr{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px}
+  .attr + .attr{border-top:1px dashed var(--line)}
+  .attr .lbl{width:104px;flex:none;color:var(--muted)}
+  .attr .track{flex:1;height:7px;border-radius:4px;background:var(--bg);position:relative;overflow:hidden}
+  .attr .track i{position:absolute;top:0;bottom:0;left:50%;background:var(--bad)}
+  .attr .track i.neg{left:auto;background:var(--good)}
+  .attr .val{width:74px;text-align:right;font-family:var(--mono);font-weight:600}
+  .limitbar{height:8px;border-radius:5px;background:var(--bg);overflow:hidden;margin:8px 0 6px;border:1px solid var(--line)}
+  .limitbar i{display:block;height:100%;background:var(--accent)}
+  .limitbar i.warn{background:var(--warn)}
+  .limitbar i.bad{background:var(--bad)}
+  .minitable{width:100%;border-collapse:collapse;font-size:12px}
+  .minitable th{text-align:left;color:var(--muted);font-weight:600;font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.04em;padding:5px 6px;border-bottom:1px solid var(--line)}
+  .minitable td{padding:6px;border-bottom:1px solid var(--line);font-family:var(--mono)}
+  .minitable td:first-child{font-family:inherit;font-weight:600}
+  .placeholder{padding:50px 20px;text-align:center;color:var(--muted)}
+  .placeholder svg{opacity:.35;margin-bottom:10px}
+
+  .link{color:var(--accent);cursor:pointer;text-decoration:none;font-size:12px}
+  .link:hover{text-decoration:underline}
+
+  /* toast */
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:#111827;color:#fff;padding:9px 14px;border-radius:10px;font-size:12.5px;
+    opacity:0;pointer-events:none;transition:.2s;z-index:90;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+  .toast.show{opacity:1;transform:translateX(-50%)}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ LEFT: context rail ============ -->
+  <aside class="rail left" id="railLeft">
+    <div class="rail-inner" id="leftInner"></div>
+  </aside>
+
+  <!-- ============ CENTER: table workbench ============ -->
+  <section class="workbench">
+    <div class="tbar">
+      <div class="trow">
+        <button class="btn ghost" id="toggleLeft" title="Toggle context panel" aria-label="Toggle context panel">▤</button>
+        <div class="popwrap" id="dateWrap">
+          <button class="btn datebtn" id="dateBtn" aria-haspopup="dialog" aria-expanded="false"></button>
+          <div id="datePop"></div>
+        </div>
+        <div class="searchbox">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.2-3.2"/></svg>
+          <input id="q" placeholder="Search counterparty…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="seg" id="regionSeg" role="group" aria-label="Region">
+          <button data-region="all">All</button>
+          <button data-region="East">East</button>
+          <button data-region="West">West</button>
+        </div>
+        <select id="ratingSel" aria-label="Rating bucket">
+          <option value="all">All ratings</option>
+          <option value="AA">AA range</option>
+          <option value="A">A range</option>
+          <option value="BBB">BBB range</option>
+        </select>
+        <select id="alertSel" aria-label="Alerts">
+          <option value="all">All rows</option>
+          <option value="alert">With alerts only</option>
+          <option value="limit">Limit &gt; 80%</option>
+        </select>
+        <span class="grow"></span>
+        <span class="count" id="activeCount"></span>
+        <button class="btn ghost" id="clearFilters" title="Clear all filters">Clear</button>
+      </div>
+
+      <div class="trow">
+        <div class="popwrap">
+          <button class="btn" id="colsBtn" aria-haspopup="dialog" aria-expanded="false">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M3 10h18"/></svg>
+            Columns <span class="count" id="colCount"></span>
+          </button>
+          <div id="colsPop"></div>
+        </div>
+        <span class="count">Density</span>
+        <div class="seg" id="densitySeg">
+          <button data-d="comfortable">Comfortable</button>
+          <button data-d="compact">Compact</button>
+        </div>
+        <span class="grow"></span>
+        <button class="btn" id="exportBtn">Export CSV</button>
+        <button class="btn ghost" id="toggleRight" title="Toggle detail panel">▥</button>
+      </div>
+    </div>
+
+    <div class="tablescroll" id="tablescroll"></div>
+
+    <div class="sbar">
+      <span id="statusRows"></span>
+      <span id="statusSel"></span>
+      <span class="grow"></span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>Esc</kbd> close detail</span>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT: detail rail ============ -->
+  <aside class="rail right" id="railRight">
+    <div class="rail-inner" id="rightInner"></div>
+  </aside>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   1. COLUMN CONFIG  — the contract between the table and its surroundings
+   Every numeric column carries a `def`; the left rail renders the glossary
+   straight from it, so documentation can never drift from the schema.
+   ===================================================================== */
+const COLUMNS = [
+  { id:'counterparty', label:'Counterparty', w:180, type:'text', lead:true, pin:true },
+  { id:'region',   label:'Region',  w:80,  type:'chip' },
+  { id:'site',     label:'Site',    w:62,  type:'text' },
+  { id:'rating',   label:'Rating',  w:74,  type:'chip' },
+  { id:'notional', label:'Notional',w:100, type:'money', agg:'sum',  def:'Gross notional of the netting set, USD m.' },
+  { id:'mtm',      label:'MtM',     w:92,  type:'money', agg:'sum',  def:'Current mark-to-market of the netting set, USD m.' },
+  { id:'cva',      label:'CVA',     w:104, type:'money', agg:'sum', bar:true,
+                   def:'Credit valuation adjustment — expected loss from counterparty default, USD m.' },
+  { id:'fva',      label:'FVA',     w:88,  type:'money', agg:'sum',  def:'Funding valuation adjustment, USD m.' },
+  { id:'epe',      label:'EPE',     w:84,  type:'money', agg:'sum',  def:'Expected positive exposure averaged over the profile horizon, USD m.' },
+  { id:'pfe',      label:'PFE',     w:84,  type:'money', agg:'sum',  def:'Potential future exposure at the 97.5% confidence level, USD m.' },
+  { id:'cs01',     label:'CS01',    w:88,  type:'signed',agg:'sum',  def:'Change in CVA for a 1bp widening of the counterparty credit spread, USD k.' },
+  { id:'irDelta',  label:'IR \u0394',w:84, type:'signed',agg:'sum',  def:'XVA sensitivity to a 1bp parallel interest-rate shift, USD k.' },
+  { id:'fxDelta',  label:'FX \u0394',w:84, type:'signed',agg:'sum',  def:'XVA sensitivity to a 1 pip FX spot move, USD k.' },
+  { id:'vega',     label:'Vega',    w:84,  type:'signed',agg:'sum',  def:'XVA sensitivity to a 1 point move in implied volatility, USD k.' },
+  { id:'pnl',      label:'P&L 1d',  w:92,  type:'signed',agg:'sum',  def:'Day-on-day XVA P&L for the netting set, USD k.' },
+  { id:'util',     label:'Limit used', w:98, type:'pct', agg:'avg',  def:'Share of the approved CVA limit consumed by the current CVA.' },
+];
+
+const DEFAULT_ORDER = COLUMNS.map(c => c.id);
+const DEFAULT_HIDDEN = new Set(['fva','epe','vega']);
+const DEFAULT_PINNED = new Set(['counterparty']);
+
+/* =====================================================================
+   2b. BUSINESS CALENDAR
+   An XVA report is only meaningful on a business day, so the picker works in
+   business days, not calendar days: weekends and market holidays are unselectable
+   and the presets resolve to real reporting dates (previous business day, quarter end…).
+   ===================================================================== */
+const TODAY = new Date(2026, 9, 9);                       // Fri 9 Oct 2026
+const HOLIDAYS = new Set(['2026-01-01','2026-08-31','2026-09-07','2026-11-26','2026-12-25']);
+
+const iso      = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const fromIso  = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const fmtDate  = d => d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });   // 08 Oct 2026
+const weekday  = d => d.toLocaleDateString('en-GB', { weekday:'long' });
+
+const isOpenDay    = d => d.getDay() !== 0 && d.getDay() !== 6 && !HOLIDAYS.has(iso(d));
+const isSelectable = d => isOpenDay(d) && d <= TODAY;      // no as-of date in the future
+
+function prevBusinessDay(d) { const x = new Date(d); do { x.setDate(x.getDate() - 1); } while (!isOpenDay(x)); return x; }
+function lastBusinessDayOfMonth(y, m) { const d = new Date(y, m + 1, 0); while (!isOpenDay(d)) d.setDate(d.getDate() - 1); return d; }
+function lastMonthEnd(anchor) {
+  const last = lastBusinessDayOfMonth(anchor.getFullYear(), anchor.getMonth());
+  if (iso(last) === iso(anchor)) return last;
+  const pm = anchor.getMonth() - 1;
+  return pm < 0 ? lastBusinessDayOfMonth(anchor.getFullYear() - 1, 11) : lastBusinessDayOfMonth(anchor.getFullYear(), pm);
+}
+function lastQuarterEnd(anchor) {
+  const prevMonth = Math.floor(anchor.getMonth() / 3) * 3 - 1;
+  return prevMonth < 0 ? lastBusinessDayOfMonth(anchor.getFullYear() - 1, 11)
+                       : lastBusinessDayOfMonth(anchor.getFullYear(), prevMonth);
+}
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DATE_PRESETS = [
+  { id:'today', label:'Today',                get: () => TODAY },
+  { id:'prev',  label:'Previous business day', get: () => prevBusinessDay(TODAY) },
+  { id:'mend',  label:'Month end',            get: () => lastMonthEnd(TODAY) },
+  { id:'qend',  label:'Quarter end',          get: () => lastQuarterEnd(TODAY) },
+  { id:'yend',  label:'Year end',             get: () => lastBusinessDayOfMonth(TODAY.getFullYear() - 1, 11) },
+];
+
+/* =====================================================================
+   2. RECORD SET (deterministic PRNG so the demo is stable)
+   ===================================================================== */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const TENORS = ['1Y','2Y','3Y','5Y','7Y','10Y'];
+
+const SEED = [
+  ['JP Morgan','West','LDN','A+'], ['Goldman Sachs','West','NYK','A+'], ['Morgan Stanley','West','NYK','A'],
+  ['Citi','West','NYK','A'], ['HSBC','East','HKG','A+'], ['BNP Paribas','West','PAR','A'],
+  ['Deutsche Bank','West','FRA','A'], ['UBS','West','ZRH','A+'], ['Barclays','West','LDN','A'],
+  ['Societe Generale','West','PAR','A'], ['Nomura','East','TOK','A-'], ['MUFG','East','TOK','A'],
+  ['Mizuho','East','TOK','A-'], ['Standard Chartered','East','SGP','A-'], ['DBS','East','SGP','AA-'],
+  ['OCBC','East','SGP','AA-'], ['ICBC','East','HKG','A'], ['China Construction Bank','East','HKG','A-'],
+  ['Santander','West','LDN','A-'], ['ING','West','LDN','BBB+'], ['Credit Agricole','West','PAR','A-'],
+  ['Banco BPM','West','LDN','BBB+'], ['Macquarie','East','SYD','A'], ['Westpac','East','SYD','AA-'],
+];
+
+/* Rows are a function of the as-of date: changing the date reseeds the generator, so the
+   book visibly moves day to day instead of being a frozen mock. */
+function makeRow(rnd, [name, region, site, rating], i) {
+  const size = 0.35 + rnd() * 1.9;                       // relative book size
+  const notional = Math.round(size * 3600);
+  const mtm = +((rnd() * 2 - 0.7) * size * 74).toFixed(1);
+  const cva = +(size * (5 + rnd() * 24)).toFixed(1);
+  const fva = +(cva * (0.35 + rnd() * 0.5)).toFixed(1);
+  const epe = +(size * (18 + rnd() * 44)).toFixed(1);
+  const pfe = +(epe * (1.5 + rnd() * 0.7)).toFixed(1);
+  const cs01 = +(cva * (3.4 + rnd() * 2.6)).toFixed(1);
+  const irDelta = +((rnd() * 2 - 1) * size * 62).toFixed(1);
+  const fxDelta = +((rnd() * 2 - 1) * size * 44).toFixed(1);
+  const vega = +((rnd() * 2 - 1) * size * 30).toFixed(1);
+  const util = +(Math.min(0.99, cva / (size * 40))).toFixed(3);
+
+  // exposure profile: EE rising to a peak then amortising, PFE above it
+  const peak = 0.45 + rnd() * 0.3;
+  const profile = TENORS.map((t, k) => {
+    const x = k / (TENORS.length - 1);
+    const shape = Math.sin(Math.PI * Math.min(1, x / (peak * 1.6) * 0.85 + 0.12));
+    const ee = +(epe * (0.55 + 0.9 * shape)).toFixed(1);
+    return { t, ee, pfe: +(ee * (1.45 + rnd() * 0.35)).toFixed(1) };
+  });
+
+  // P&L explain — build the attribution first, then derive the day's P&L from it,
+  // so the residual stays realistic (a big residual means the explain has failed).
+  const parts = [
+    ['CS01',       +(cs01   * -(0.30 + rnd() * 0.25)).toFixed(1)],
+    ['IR \u0394',  +(irDelta *  (0.25 + rnd() * 0.30)).toFixed(1)],
+    ['FX \u0394',  +(fxDelta *  (0.20 + rnd() * 0.25)).toFixed(1)],
+    ['Vega',       +(vega    *  (0.30 + rnd() * 0.35)).toFixed(1)],
+    ['New trades', +(size * (4 + rnd() * 18)).toFixed(1)],
+  ];
+  const explained = +parts.reduce((s, [, v]) => s + v, 0).toFixed(1);
+  const residual  = +((rnd() * 2 - 1) * Math.max(1, Math.abs(explained) * 0.07)).toFixed(1);
+  const pnl       = +(explained + residual).toFixed(1);
+  parts.push(['Residual', residual]);
+
+  const alerts = [];
+  if (util > 0.8) alerts.push('Limit');
+  if (Math.abs(pnl) > 60) alerts.push('P&L');
+  if (!(i % 7)) alerts.push('Stale price');
+
+  const trades = Array.from({ length: 5 }, (_, k) => {
+    const tn = TENORS[(i + k * 2) % TENORS.length];
+    const kind = ['IRS','CCS','FX Fwd','Swaption','CDS'][(i + k) % 5];
+    return {
+      id: `${kind.slice(0,3).toUpperCase()}-${(i + 1) * 1000 + k * 37}`,
+      kind, tenor: tn,
+      notional: +(notional * (0.08 + rnd() * 0.24)).toFixed(1),
+      mtm: +((rnd() * 2 - 1) * size * 12).toFixed(1),
+      delta: +((rnd() * 2 - 1) * size * 18).toFixed(1),
+    };
+  });
+
+  return { id: 'cp' + i, name, region, site, rating, notional, mtm, cva, fva, epe, pfe,
+           cs01, irDelta, fxDelta, vega, pnl, util, profile, parts, alerts, trades };
+}
+
+const hashSeed = s => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+const buildRows = dateStr => { const rnd = mulberry32(hashSeed(dateStr)); return SEED.map((m, i) => makeRow(rnd, m, i)); };
+
+const DEFAULT_ASOF = '2026-10-08';                         // previous business day
+let ROWS = buildRows(DEFAULT_ASOF);
+let CP_INDEX = Object.fromEntries(ROWS.map(r => [r.id, r]));
+const rebuildRows = () => {
+  ROWS = buildRows(state.asOf);
+  CP_INDEX = Object.fromEntries(ROWS.map(r => [r.id, r]));
+};
+
+/* =====================================================================
+   3. STATE
+   ===================================================================== */
+const state = {
+  q: '', region: 'all', rating: 'all', alert: 'all',
+  asOf: DEFAULT_ASOF, dateOpen: false, calMonth: fromIso(DEFAULT_ASOF), calFocus: DEFAULT_ASOF,
+  sort: { id: 'cva', dir: 'desc' },
+  order: [...DEFAULT_ORDER],
+  hidden: new Set(DEFAULT_HIDDEN),
+  pinned: new Set(DEFAULT_PINNED),
+  density: 'compact',
+  selectedId: null,
+  detailTab: 'overview',
+  colsOpen: false,
+  leftOpen: true,
+  rightOpen: true,
+};
+
+const colById = id => COLUMNS.find(c => c.id === id);
+const visibleCols = () => state.order.map(colById).filter(c => !state.hidden.has(c.id));
+const pinnedCols  = () => visibleCols().filter(c => state.pinned.has(c.id));
+
+/* =====================================================================
+   4. FORMATTING
+   ===================================================================== */
+const nf = (v, d = 1) => v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const sgn = (v, d = 1) => (v > 0 ? '+' : v < 0 ? '\u2212' : '') + nf(Math.abs(v), d);
+const pct = v => (v * 100).toFixed(0) + '%';
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[ch]));
+
+function cellText(row, c) {
+  const v = row[c.id];
+  if (c.type === 'money')  return nf(v);
+  if (c.type === 'signed') return sgn(v);
+  if (c.type === 'pct')    return pct(v);
+  return String(v);
+}
+function cellClass(row, c) {
+  if (c.type === 'money' || c.type === 'pct') return 'num';
+  if (c.type === 'signed') return 'num ' + (row[c.id] > 0 ? 'pos' : row[c.id] < 0 ? 'neg' : '');
+  return c.type === 'chip' ? '' : 'num';
+}
+
+/* =====================================================================
+   5. FILTER + SORT
+   ===================================================================== */
+function filtered() {
+  const q = state.q.trim().toLowerCase();
+  let out = ROWS.filter(r => {
+    if (q && !(r.name.toLowerCase().includes(q) || r.site.toLowerCase().includes(q))) return false;
+    if (state.region !== 'all' && r.region !== state.region) return false;
+    if (state.rating !== 'all' && !r.rating.startsWith(state.rating)) return false;
+    if (state.alert === 'alert' && !r.alerts.length) return false;
+    if (state.alert === 'limit' && r.util <= 0.8) return false;
+    return true;
+  });
+  const { id, dir } = state.sort;
+  if (id && dir) {
+    const c = colById(id);
+    out = [...out].sort((a, b) => {
+      const av = a[id], bv = b[id];
+      const cmp = c.type === 'text' || c.type === 'chip'
+        ? String(av).localeCompare(String(bv)) : av - bv;
+      return dir === 'asc' ? cmp : -cmp;
+    });
+  }
+  return out;
+}
+const activeFilters = () => [
+  state.q.trim()        && { key:'q',      label:`Search “${state.q.trim()}”` },
+  state.region !== 'all'&& { key:'region', label:`Region: ${state.region}` },
+  state.rating !== 'all'&& { key:'rating', label:`Rating: ${state.rating}` },
+  state.alert  !== 'all'&& { key:'alert',  label: state.alert === 'limit' ? 'Limit > 80%' : 'With alerts' },
+].filter(Boolean);
+
+/* =====================================================================
+   6. TABLE RENDER
+   ===================================================================== */
+const tablescroll = document.getElementById('tablescroll');
+
+function pinOffsets() {
+  const off = {}; let x = 0;
+  for (const c of pinnedCols()) { off[c.id] = x; x += c.w; }
+  return off;
+}
+
+function renderTable() {
+  const cols = visibleCols();
+  const rows = filtered();
+  const off = pinOffsets();
+  const totalW = cols.reduce((s, c) => s + c.w, 0);
+  const maxCva = Math.max(...ROWS.map(r => r.cva));
+
+  if (!rows.length) {
+    tablescroll.innerHTML = `<div class="empty"><b>No counterparties match</b>
+      ${activeFilters().length ? 'Loosen the filters, or clear them to see all ' + ROWS.length + ' rows.' : ''}</div>`;
+    renderStatus(rows);
+    return;
+  }
+
+  const head = cols.map(c => {
+    const sorted = state.sort.id === c.id && state.sort.dir;
+    const mark = sorted ? `<span class="sortmark">${state.sort.dir === 'asc' ? '\u25B2' : '\u25BC'}</span>` : '';
+    const isPin = state.pinned.has(c.id);
+    const numeric = c.type !== 'text' && c.type !== 'chip';
+    return `<th class="${numeric ? 'num' : ''}${isPin ? ' pin' : ''}"${isPin ? ` style="left:${off[c.id]}px"` : ''}
+                data-sort="${c.id}" aria-sort="${sorted ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"
+                title="${esc(c.def || c.label)}">${esc(c.label)}${mark}</th>`;
+  }).join('');
+
+  const body = rows.map(r => {
+    const isSel = r.id === state.selectedId;
+    const tds = cols.map(c => {
+      const pinned = state.pinned.has(c.id);
+      const cls = [cellClass(r, c), pinned ? 'pin' : '', c.lead ? 'lead' : ''].filter(Boolean).join(' ');
+      const style = pinned ? ` style="left:${off[c.id]}px"` : '';
+      let inner;
+      if (c.id === 'region') inner = `<span class="chip">${esc(r.region)}</span>`;
+      else if (c.id === 'rating') inner = `<span class="chip rate">${esc(r.rating)}</span>`;
+      else if (c.id === 'counterparty') inner = esc(r.name);
+      else if (c.bar) inner = `<span class="cellbar"><i class="fill" style="width:${(r.cva / maxCva * 88).toFixed(0)}%"></i><span class="v">${nf(r.cva)}</span></span>`;
+      else inner = cellText(r, c);
+      return `<td class="${cls}"${style}>${inner}</td>`;
+    }).join('');
+    return `<tr data-row="${r.id}" class="${isSel ? 'sel' : ''}" tabindex="-1">${tds}</tr>`;
+  }).join('');
+
+  const foot = cols.map((c, i) => {
+    const pinned = state.pinned.has(c.id);
+    const style = pinned ? ` style="left:${off[c.id]}px"` : '';
+    const cls = [c.agg ? 'num' : (i === 0 ? 'label' : 'num'), pinned ? 'pin' : ''].filter(Boolean).join(' ');
+    let txt = '';
+    if (i === 0) txt = `Total \u00B7 ${rows.length} rows`;
+    else if (c.agg === 'sum') txt = c.type === 'pct' ? '' : cellText({ [c.id]: rows.reduce((s, r) => s + r[c.id], 0) }, c);
+    else if (c.agg === 'avg') txt = pct(rows.reduce((s, r) => s + r[c.id], 0) / rows.length);
+    return `<td class="${cls}"${style}>${txt}</td>`;
+  }).join('');
+
+  tablescroll.innerHTML = `
+    <table style="width:${totalW}px">
+      <colgroup>${cols.map(c => `<col style="width:${c.w}px">`).join('')}</colgroup>
+      <thead><tr>${head}</tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr>${foot}</tr></tfoot>
+    </table>`;
+  renderStatus(rows);
+}
+
+function renderStatus(rows) {
+  document.getElementById('statusRows').textContent =
+    `${rows.length} of ${ROWS.length} counterparties \u00B7 ${visibleCols().length} of ${COLUMNS.length} columns`;
+  const sel = state.selectedId && CP_INDEX[state.selectedId];
+  document.getElementById('statusSel').innerHTML = sel
+    ? `<span class="dotactive"></span><b>${esc(sel.name)}</b>&ensp;${esc(sel.region)} \u00B7 ${esc(sel.site)}`
+    : '<span class="mut">No row selected</span>';
+  const af = activeFilters().length;
+  document.getElementById('activeCount').innerHTML = af ? `${af} active` : '';
+  // only surface "Clear" when there is something to clear — otherwise it just eats toolbar width
+  document.getElementById('clearFilters').style.display = af ? '' : 'none';
+  document.getElementById('colCount').textContent = `${visibleCols().length}/${COLUMNS.length}`;
+}
+
+/* =====================================================================
+   7. LEFT RAIL — context for the table
+   ===================================================================== */
+function renderLeft() {
+  const rows = filtered();
+  const cols = visibleCols().filter(c => c.def);
+  const af = activeFilters();
+  const stale = ROWS.filter(r => r.alerts.includes('Stale price')).length;
+
+  document.getElementById('leftInner').innerHTML = `
+    <div class="rh">
+      <h2>About this table</h2>
+      <button class="btn ghost" id="closeLeft" title="Collapse">✕</button>
+    </div>
+
+    <div class="card">
+      <h3>Dataset</h3>
+      <div class="kv"><span class="k">Table</span><span class="v">XVA \u00B7 Counterparty Aggregate</span></div>
+      <div class="kv"><span class="k">As-of date</span><span class="v">${fmtDate(fromIso(state.asOf))}</span></div>
+      <div class="kv"><span class="k">Day type</span><span class="v">${weekday(fromIso(state.asOf))}</span></div>
+      <div class="kv"><span class="k">Calculation run</span><span class="v">RUN-${state.asOf.replace(/-/g, '')}-0412</span></div>
+      <div class="kv"><span class="k">Refreshed</span><span class="v">06:10 UTC</span></div>
+      <div class="kv"><span class="k">Rows in scope</span><span class="v">${rows.length} of ${ROWS.length}</span></div>
+      <div class="kv"><span class="k">Grain</span><span class="v">Netting set</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Active filters</h3>
+      ${af.length ? af.map(f => `
+          <div class="filt"><span class="mut">◷</span><span>${esc(f.label)}</span>
+            <button class="x" data-clearfilter="${f.key}" title="Remove">✕</button></div>`).join('')
+        : '<div class="mut" style="font-size:12.5px">No filters applied — showing the full book.</div>'}
+      ${af.length ? `<div style="margin-top:8px"><span class="link" id="clearFromRail">Clear all filters</span></div>` : ''}
+    </div>
+
+    <div class="card">
+      <h3>Confidence</h3>
+      <span class="badge ok">● Pricing complete</span>
+      <span class="badge ${stale ? 'warn' : 'ok'}">● ${stale} stale price${stale === 1 ? '' : 's'}</span>
+      <span class="badge ok">● CSA verified</span>
+      <span class="badge">● Model v4.2</span>
+      <div style="margin-top:6px"><span class="link" id="lineage">View lineage &amp; run log →</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Measure glossary <span class="mut" style="text-transform:none;letter-spacing:0">(${cols.length} shown)</span></h3>
+      ${cols.map(c => `<div class="def"><div class="t"><span>${esc(c.label)}</span>
+          <span class="mut" style="font:10px var(--mono)">${c.type === 'pct' ? '%' : c.type === 'money' ? 'USD m' : 'USD k'}</span></div>
+        <div class="d">${esc(c.def)}</div></div>`).join('')}
+    </div>
+
+    <div class="card">
+      <h3>How to use this table</h3>
+      <div class="def"><div class="t">Sort</div><div class="d">Click any column header to cycle descending → ascending → off. Default is CVA high-to-low.</div></div>
+      <div class="def"><div class="t">Drill down</div><div class="d">Click a row to open its detail view. Use ↑ / ↓ to walk the book without the mouse.</div></div>
+      <div class="def"><div class="t">Choose columns</div><div class="d">Columns menu: tick to show, drag to reorder, pin to freeze against horizontal scroll.</div></div>
+    </div>`;
+}
+
+/* =====================================================================
+   8. RIGHT RAIL — detail of the selected row
+   ===================================================================== */
+function profileSVG(row) {
+  const W = 300, H = 118, P = 22;
+  const pts = row.profile;
+  const max = Math.max(...pts.map(p => p.pfe)) * 1.16;
+  const x = i => P + i * (W - 2 * P) / (pts.length - 1);
+  const y = v => H - P - (v / max) * (H - 2 * P);
+  const line = k => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ');
+  const area = `${line('pfe')} L${x(pts.length - 1)},${H - P} L${x(0)},${H - P} Z`;
+  const gid = 'g_' + row.id;
+  const grid = [0, .5, 1].map(f => {
+    const yy = H - P - f * (H - 2 * P);
+    return `<line x1="${P}" x2="${W - P}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>
+            <text x="${P - 4}" y="${yy + 3}" text-anchor="end" font-size="8" fill="var(--muted)">${nf(max * f, 0)}</text>`;
+  }).join('');
+  const xlab = pts.map((p, i) => `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" font-size="8" fill="var(--muted)">${p.t}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="118" role="img" aria-label="Exposure profile">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="var(--accent)" stop-opacity=".28"/>
+      <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    ${grid}
+    <path d="${area}" fill="url(#${gid})"/>
+    <path d="${line('pfe')}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="4 3"/>
+    <path d="${line('ee')}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${xlab}
+    <circle cx="${x(pts.length - 1)}" cy="${y(pts[pts.length - 1].ee)}" r="2.6" fill="var(--accent)"/>
+  </svg>`;
+}
+
+function renderRight() {
+  const host = document.getElementById('rightInner');
+  const row = state.selectedId && CP_INDEX[state.selectedId];
+
+  if (!row) {
+    host.innerHTML = `
+      <div class="rh"><h2>Detail</h2>
+        <button class="btn ghost" id="closeRight" title="Collapse">✕</button></div>
+      <div class="placeholder">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
+        <div><b style="color:var(--ink)">No row selected</b></div>
+        <div style="margin-top:6px">Click any counterparty row to see its exposure profile, P&amp;L explain and trades here.</div>
+      </div>`;
+    return;
+  }
+
+  const verdict = row.util > 0.9 ? 'bad' : row.util > 0.8 ? 'warn' : '';
+  const tabs = [['overview','Overview'],['exposure','Exposure'],['pnl','P&L explain'],['trades','Trades']];
+
+  let body = '';
+  if (state.detailTab === 'overview') {
+    body = `
+      <div class="metrics">
+        <div><div class="k">Notional</div><div class="v">${nf(row.notional, 0)}</div></div>
+        <div><div class="k">MtM</div><div class="v ${row.mtm > 0 ? 'pos' : 'neg'}">${sgn(row.mtm)}</div></div>
+        <div><div class="k">EPE</div><div class="v">${nf(row.epe)}</div></div>
+        <div><div class="k">PFE</div><div class="v">${nf(row.pfe)}</div></div>
+        <div><div class="k">CS01</div><div class="v ${row.cs01 > 0 ? 'pos' : 'neg'}">${sgn(row.cs01)}</div></div>
+        <div><div class="k">FVA</div><div class="v">${nf(row.fva)}</div></div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <h3>CVA limit utilisation</h3>
+        <div class="limitbar"><i class="${verdict}" style="width:${Math.min(100, row.util * 100).toFixed(0)}%"></i></div>
+        <div class="kv" style="border:0"><span class="k">${pct(row.util)} of approved limit used</span>
+          <span class="v">${nf(row.cva, 1)} / ${nf(row.cva / row.util, 0)}</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Risks &amp; alerts</h3>
+        ${row.alerts.length
+          ? row.alerts.map(a => `<span class="badge warn">▲ ${esc(a)}</span>`).join('')
+          : '<span class="badge ok">● No open alerts</span>'}
+        ${row.alerts.includes('Limit') ? '<div class="mut" style="font-size:12px;margin-top:8px">CVA limit is above the 80% soft trigger — escalate to Credit Risk before adding exposure.</div>' : ''}
+      </div>`;
+  } else if (state.detailTab === 'exposure') {
+    body = `
+      <div class="card">
+        <h3>Exposure profile</h3>
+        ${profileSVG(row)}
+        <div style="display:flex;gap:14px;margin-top:6px;font-size:11.5px">
+          <span><b style="color:var(--accent)">—</b> EPE</span>
+          <span><b style="color:var(--accent)">- -</b> PFE 97.5%</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>By tenor <span class="mut" style="text-transform:none">USD m</span></h3>
+        <table class="minitable">
+          <thead><tr><th>Tenor</th><th>EE</th><th>PFE</th><th>PFE − EE</th></tr></thead>
+          <tbody>${row.profile.map(p => `<tr><td>${p.t}</td><td>${nf(p.ee)}</td><td>${nf(p.pfe)}</td>
+            <td class="mut">${nf(p.pfe - p.ee)}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+  } else if (state.detailTab === 'pnl') {
+    const maxAbs = Math.max(...row.parts.map(([, v]) => Math.abs(v)), 1);
+    body = `
+      <div class="card">
+        <h3>Day-on-day attribution <span class="mut" style="text-transform:none">USD k</span></h3>
+        ${row.parts.map(([k, v]) => `
+          <div class="attr">
+            <span class="lbl">${esc(k)}</span>
+            <span class="track"><i class="${v < 0 ? 'neg' : ''}" style="width:${(Math.abs(v) / maxAbs * 50).toFixed(1)}%"></i></span>
+            <span class="val ${v > 0 ? 'pos' : v < 0 ? 'neg' : 'mut'}">${sgn(v)}</span>
+          </div>`).join('')}
+      </div>
+      <div class="card">
+        <h3>Reconciliation</h3>
+        <div class="kv"><span class="k">Sum of explained</span><span class="v">${sgn(row.parts.slice(0, -1).reduce((s, [, v]) => s + v, 0))}</span></div>
+        <div class="kv"><span class="k">Residual</span><span class="v">${sgn(row.parts.at(-1)[1])}</span></div>
+        <div class="kv"><span class="k">Total P&amp;L 1d</span><span class="v ${row.pnl > 0 ? 'pos' : 'neg'}">${sgn(row.pnl)}</span></div>
+        <div class="mut" style="font-size:11.5px;margin-top:8px">Residual under 10% of gross attribution is treated as explainable.</div>
+      </div>`;
+  } else {
+    body = `
+      <div class="card">
+        <h3>Top trades by notional</h3>
+        <table class="minitable">
+          <thead><tr><th>Trade</th><th>Type</th><th>Tenor</th><th>Notional</th><th>MtM</th></tr></thead>
+          <tbody>${row.trades.map(t => `<tr><td>${esc(t.id)}</td><td class="mut">${esc(t.kind)}</td>
+            <td>${t.tenor}</td><td>${nf(t.notional)}</td>
+            <td class="${t.mtm > 0 ? 'pos' : 'neg'}">${sgn(t.mtm)}</td></tr>`).join('')}</tbody>
+        </table>
+        <div style="margin-top:10px"><span class="link" id="allTrades">Open all ${row.trades.length * 24} trades in blotter →</span></div>
+      </div>`;
+  }
+
+  host.innerHTML = `
+    <div class="rh"><h2>Detail</h2><button class="btn ghost" id="closeRight" title="Collapse">✕</button></div>
+    <div class="dhead">
+      <div class="dname">${esc(row.name)}</div>
+      <div class="dmeta">
+        <span class="chip">${esc(row.region)}</span>
+        <span class="chip">${esc(row.site)}</span>
+        <span class="chip rate">${esc(row.rating)}</span>
+        ${row.alerts.map(a => `<span class="chip alert">${esc(a)}</span>`).join('')}
+      </div>
+      <div class="big">
+        <span class="n">${nf(row.cva)}</span><span class="u">CVA \u00B7 USD m</span>
+        <span class="delta ${row.pnl > 0 ? 'up' : 'dn'}">${sgn(row.pnl)}k today</span>
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      ${tabs.map(([id, label]) => `<button role="tab" aria-selected="${state.detailTab === id}" data-tab="${id}">${label}</button>`).join('')}
+    </div>
+    ${body}`;
+}
+
+/* =====================================================================
+   9. COLUMN MANAGER
+   ===================================================================== */
+function renderColsPop() {
+  const host = document.getElementById('colsPop');
+  if (!state.colsOpen) { host.innerHTML = ''; return; }
+  const search = (host.dataset.q || '').toLowerCase();
+  host.innerHTML = `
+    <div class="pop" role="dialog">
+      <div class="phead">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="color:var(--muted)"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.2-3.2"/></svg>
+        <input id="colSearch" placeholder="Find a column…" value="${esc(host.dataset.q || '')}" autocomplete="off">
+      </div>
+      <div class="plist" id="colList"></div>
+      <div class="pfoot">
+        <button class="btn" data-colact="all">Show all</button>
+        <button class="btn" data-colact="reset">Reset to default</button>
+        <span class="spacer" style="flex:1"></span>
+        <span class="count">${visibleCols().length}/${COLUMNS.length}</span>
+      </div>
+    </div>`;
+  renderColList();
+
+  host.querySelector('#colSearch').oninput = e => { host.dataset.q = e.target.value; renderColList(); };
+  host.querySelector('.plist').addEventListener('click', onColListClick);
+  host.querySelector('.plist').addEventListener('dragstart', onDragStart);
+  host.querySelector('.plist').addEventListener('dragover', onDragOver);
+  host.querySelector('.plist').addEventListener('drop', onDrop);
+  host.querySelector('.plist').addEventListener('dragend', () => document.querySelectorAll('.colrow').forEach(e => e.classList.remove('dragging','over')));
+  host.querySelector('.pfoot').onclick = onColFootClick;
+}
+
+function renderColList() {
+  const list = document.getElementById('colList');
+  if (!list) return;
+  const q = (document.getElementById('colsPop').dataset.q || '').toLowerCase();
+  const items = state.order.map(colById).filter(c => !q || c.label.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+  if (!items.length) { list.innerHTML = '<div class="empty" style="padding:22px">No column matches.</div>'; return; }
+  list.innerHTML = items.map(c => `
+    <div class="colrow" draggable="true" data-col="${c.id}">
+      <span class="grip" title="Drag to reorder">⠿</span>
+      <span class="tick" data-s="${state.hidden.has(c.id) ? 'off' : 'on'}" data-toggle="${c.id}"></span>
+      <span class="ctitle">${esc(c.label)}</span>
+      <span class="kind">${c.type === 'money' ? 'USD m' : c.type === 'pct' ? '%' : c.type === 'signed' ? 'USD k' : 'text'}</span>
+      <button class="pinbtn" data-move="up"   data-for="${c.id}" title="Move left" aria-label="Move ${esc(c.label)} left">◂</button>
+      <button class="pinbtn" data-move="down" data-for="${c.id}" title="Move right" aria-label="Move ${esc(c.label)} right">▸</button>
+      <button class="pinbtn" data-pin="${c.id}" data-on="${state.pinned.has(c.id) ? 1 : 0}"
+              title="${state.pinned.has(c.id) ? 'Unpin' : 'Pin to left'}" aria-pressed="${state.pinned.has(c.id)}">📌</button>
+    </div>`).join('');
+}
+
+function moveCol(id, dir) {
+  const i = state.order.indexOf(id);
+  const j = dir === 'up' ? i - 1 : i + 1;
+  if (j < 0 || j >= state.order.length) return;
+  [state.order[i], state.order[j]] = [state.order[j], state.order[i]];
+}
+
+function onColListClick(e) {
+  const t = e.target.closest('[data-toggle]');
+  const p = e.target.closest('[data-pin]');
+  const m = e.target.closest('[data-move]');
+  if (m) {
+    moveCol(m.dataset.for, m.dataset.move);
+    renderColList(); renderTable();
+  } else if (t) {
+    const id = t.dataset.toggle;
+    state.hidden.has(id) ? state.hidden.delete(id) : state.hidden.add(id);
+    if (state.hidden.has(id)) state.pinned.delete(id);
+    renderColList(); renderTable(); renderLeft();
+  } else if (p) {
+    const id = p.dataset.pin;
+    state.pinned.has(id) ? state.pinned.delete(id) : state.pinned.add(id);
+    renderColList(); renderTable();
+  }
+}
+function onColFootClick(e) {
+  const act = e.target.dataset.colact;
+  if (act === 'all')   state.hidden = new Set();
+  if (act === 'reset') { state.hidden = new Set(DEFAULT_HIDDEN);
+                         state.order = [...DEFAULT_ORDER]; state.pinned = new Set(DEFAULT_PINNED); }
+  renderColsPop(); renderTable(); renderLeft();
+}
+
+/* drag & drop reorder */
+let dragId = null;
+function onDragStart(e) {
+  const row = e.target.closest('[data-col]');
+  if (!row) return;
+  dragId = row.dataset.col; row.classList.add('dragging');
+}
+function onDragOver(e) {
+  e.preventDefault();
+  const row = e.target.closest('[data-col]');
+  document.querySelectorAll('.colrow').forEach(x => x.classList.remove('over'));
+  if (row && row.dataset.col !== dragId) row.classList.add('over');
+}
+function onDrop(e) {
+  const row = e.target.closest('[data-col]');
+  if (!row || !dragId || row.dataset.col === dragId) return;
+  const from = state.order.indexOf(dragId), to = state.order.indexOf(row.dataset.col);
+  state.order.splice(from, 1); state.order.splice(to, 0, dragId);
+  dragId = null;
+  renderColsPop(); renderTable();
+}
+
+/* =====================================================================
+   9b. AS-OF DATE PICKER
+   ===================================================================== */
+const ICON_CAL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`;
+
+function renderDateBtn() {
+  const d = fromIso(state.asOf);
+  const btn = document.getElementById('dateBtn');
+  btn.innerHTML = `${ICON_CAL} <span class="k">As of</span>&nbsp;<b>${fmtDate(d)}</b>`;
+  btn.title = `As-of date · ${weekday(d)} (business day)`;
+  btn.setAttribute('aria-expanded', String(state.dateOpen));
+}
+
+function renderDatePop() {
+  const host = document.getElementById('datePop');
+  if (!state.dateOpen) { host.innerHTML = ''; return; }
+  const y = state.calMonth.getFullYear(), mo = state.calMonth.getMonth();
+  const lead = (new Date(y, mo, 1).getDay() + 6) % 7;            // Monday-first
+  const nDays = new Date(y, mo + 1, 0).getDate();
+
+  const cells = Array.from({ length: lead }, () => '<span class="day pad"></span>');
+  for (let d = 1; d <= nDays; d++) {
+    const dt = new Date(y, mo, d), k = iso(dt), ok = isSelectable(dt);
+    const cls = ['day', ok ? '' : 'off',
+      k === state.asOf ? 'sel' : '',
+      k === iso(TODAY) ? 'today' : '',
+      k === state.calFocus ? 'focus' : ''].filter(Boolean).join(' ');
+    // a disabled day is disabled for one of two different reasons — say which
+    const why = !isOpenDay(dt) ? 'Non-business day (weekend or market holiday)'
+                               : 'Future date — not yet reportable';
+    cells.push(`<button class="${cls}" data-day="${k}" tabindex="-1"${ok ? '' : ` disabled title="${why}"`}>${d}</button>`);
+  }
+  const nextDisabled = new Date(y, mo + 1, 1) > TODAY;
+
+  host.innerHTML = `
+    <div class="pop dp" role="dialog" aria-label="Choose as-of date" tabindex="-1" id="dpRoot">
+      <div class="dpgrid">
+        <div class="presets">
+          <div class="ptitle">Jump to</div>
+          ${DATE_PRESETS.map(p => {
+            const v = iso(p.get());
+            return `<button class="preset" data-preset="${p.id}" aria-pressed="${v === state.asOf}">${p.label}</button>`;
+          }).join('')}
+        </div>
+        <div class="calwrap">
+          <div class="calhead">
+            <button class="navbtn" data-calnav="-1" aria-label="Previous month">‹</button>
+            <div class="calmonth">${MONTHS[mo]} ${y}</div>
+            <button class="navbtn" data-calnav="1" aria-label="Next month" ${nextDisabled ? 'disabled' : ''}>›</button>
+          </div>
+          <div class="caldow">${['Mo','Tu','We','Th','Fr','Sa','Su'].map(d => `<span>${d}</span>`).join('')}</div>
+          <div class="calgrid">${cells.join('')}</div>
+        </div>
+      </div>
+      <div class="dpfoot">
+        <span class="legend"><i style="background:var(--accent);border-color:var(--accent)"></i> as-of</span>
+        <span class="legend"><i></i> today</span>
+        <span class="legend"><i style="background:var(--line)"></i> unavailable</span>
+        <span style="flex:1"></span>
+        <button class="btn" data-act="dp-close">Done</button>
+      </div>
+    </div>`;
+
+  const root = host.querySelector('#dpRoot');
+  root.addEventListener('click', onDatePopClick);
+  root.addEventListener('keydown', onCalKey);
+  root.focus({ preventScroll: true });
+}
+
+function setAsOf(isoStr) {
+  if (!isSelectable(fromIso(isoStr))) return;
+  state.asOf = isoStr;
+  state.calFocus = isoStr;
+  state.calMonth = fromIso(isoStr);
+  rebuildRows();
+  if (state.selectedId && !CP_INDEX[state.selectedId]) state.selectedId = null;
+  renderTable(); renderLeft(); renderRight(); renderDateBtn(); renderDatePop();
+  toast(`As-of date ${fmtDate(fromIso(isoStr))} — book re-priced`);
+}
+
+function onDatePopClick(e) {
+  const nav  = e.target.closest('[data-calnav]');
+  const pre  = e.target.closest('[data-preset]');
+  const day  = e.target.closest('[data-day]');
+  const done = e.target.closest('[data-act="dp-close"]');
+  if (nav) {
+    state.calMonth = new Date(state.calMonth.getFullYear(), state.calMonth.getMonth() + Number(nav.dataset.calnav), 1);
+    renderDatePop();
+  } else if (pre) {
+    setAsOf(iso(DATE_PRESETS.find(p => p.id === pre.dataset.preset).get()));
+  } else if (day) {
+    setAsOf(day.dataset.day);
+  } else if (done) {
+    state.dateOpen = false; renderDatePop(); renderDateBtn();
+  }
+}
+
+function onCalKey(e) {
+  const cur = fromIso(state.calFocus);
+  let next = null;
+  if (e.key === 'ArrowLeft')       next = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() - 1);
+  else if (e.key === 'ArrowRight') next = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+  else if (e.key === 'ArrowUp')    next = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() - 7);
+  else if (e.key === 'ArrowDown')  next = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 7);
+  else if (e.key === 'PageUp')     next = new Date(cur.getFullYear(), cur.getMonth() - 1, cur.getDate());
+  else if (e.key === 'PageDown')   next = new Date(cur.getFullYear(), cur.getMonth() + 1, cur.getDate());
+  else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    if (isSelectable(cur)) setAsOf(iso(cur));
+    else {
+      // never fail silently: say why this date can't be an as-of date
+      const why = !isOpenDay(cur) ? `a ${weekday(cur).toLowerCase()} (non-business day)` : 'in the future';
+      toast(`${fmtDate(cur)} is ${why} — no report is published`);
+    }
+    return;
+  }
+  else if (e.key === 'Escape') { e.preventDefault(); state.dateOpen = false; renderDatePop(); renderDateBtn(); return; }
+  else return;
+
+  e.preventDefault();
+  if (next > TODAY) return;                                      // never navigate past the as-of ceiling
+  state.calFocus = iso(next);
+  if (next.getMonth() !== state.calMonth.getMonth() || next.getFullYear() !== state.calMonth.getFullYear())
+    state.calMonth = new Date(next.getFullYear(), next.getMonth(), 1);
+  renderDatePop();
+  host_queryFocus();
+}
+function host_queryFocus() {
+  const el = document.querySelector('#dpRoot .day.focus') || document.querySelector('#dpRoot');
+  el?.scrollIntoView({ block: 'nearest' });
+  document.getElementById('dpRoot')?.focus({ preventScroll: true });
+}
+
+
+/* =====================================================================
+   10. EVENTS
+   ===================================================================== */
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 1900);
+}
+
+document.getElementById('q').oninput = e => { state.q = e.target.value; renderTable(); renderLeft(); };
+document.getElementById('regionSeg').onclick = e => {
+  const b = e.target.closest('[data-region]'); if (!b) return;
+  state.region = b.dataset.region; syncSegs(); renderTable(); renderLeft();
+};
+document.getElementById('ratingSel').onchange = e => { state.rating = e.target.value; renderTable(); renderLeft(); };
+document.getElementById('alertSel').onchange  = e => { state.alert  = e.target.value; renderTable(); renderLeft(); };
+
+document.getElementById('clearFilters').onclick = () => {
+  state.q = ''; state.region = 'all'; state.rating = 'all'; state.alert = 'all';
+  document.getElementById('q').value = ''; syncSegs(); renderTable(); renderLeft();
+};
+document.getElementById('densitySeg').onclick = e => {
+  const b = e.target.closest('[data-d]'); if (!b) return;
+  state.density = b.dataset.d;
+  document.documentElement.style.setProperty('--rowh', state.density === 'compact' ? '34px' : '46px');
+  syncSegs();
+};
+document.getElementById('toggleLeft').onclick  = () => { state.leftOpen  = !state.leftOpen;
+  document.getElementById('railLeft').classList.toggle('closed', !state.leftOpen); };
+document.getElementById('toggleRight').onclick = () => { state.rightOpen = !state.rightOpen;
+  document.getElementById('railRight').classList.toggle('closed', !state.rightOpen); };
+
+document.getElementById('colsBtn').onclick = e => {
+  e.stopPropagation(); state.colsOpen = !state.colsOpen;
+  if (state.colsOpen && state.dateOpen) { state.dateOpen = false; renderDatePop(); renderDateBtn(); }
+  document.getElementById('colsBtn').setAttribute('aria-expanded', state.colsOpen);
+  renderColsPop();
+};
+document.getElementById('dateBtn').onclick = e => {
+  e.stopPropagation();
+  state.dateOpen = !state.dateOpen;
+  if (state.dateOpen) {
+    if (state.colsOpen) { state.colsOpen = false; renderColsPop(); }   // only one popover at a time
+    state.calMonth = fromIso(state.asOf);
+    state.calFocus = state.asOf;
+  }
+  renderDatePop(); renderDateBtn();
+};
+document.getElementById('exportBtn').onclick = () => {
+  const cols = visibleCols(), rows = filtered();
+  const csv = [cols.map(c => c.label).join(','),
+    ...rows.map(r => cols.map(c => `"${String(r[c.id])}"`).join(','))].join('\n');
+  try {
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'xva-counterparty.csv' });
+    a.click(); URL.revokeObjectURL(url);
+    toast(`Exported ${rows.length} rows × ${cols.length} columns`);
+  } catch { toast(`CSV ready: ${rows.length} rows × ${cols.length} columns`); }
+};
+
+/* delegate everything that lives inside the two rails */
+document.body.addEventListener('click', e => {
+  // Click-outside for the columns popover. This must run BEFORE the branches below,
+  // because those re-render and `return`, skipping the check entirely.
+  // Caveat: `.plist` handlers re-render the list before this runs, detaching the clicked
+  // node — a detached node has no ancestors, so `closest()` would wrongly return null
+  // and we would mistake our own interaction for a click-outside.
+  if (state.colsOpen && e.target.isConnected
+      && !e.target.closest('#colsPop') && !e.target.closest('#colsBtn')) {
+    state.colsOpen = false;
+    document.getElementById('colsBtn').setAttribute('aria-expanded', 'false');
+    renderColsPop();
+  }
+  if (state.dateOpen && e.target.isConnected
+      && !e.target.closest('#datePop') && !e.target.closest('#dateBtn')) {
+    state.dateOpen = false; renderDatePop(); renderDateBtn();
+  }
+  const t = e.target.closest('[data-row]');
+  if (t) {
+    state.selectedId = t.dataset.row;
+    if (!state.rightOpen) { state.rightOpen = true; document.getElementById('railRight').classList.remove('closed'); }
+    renderTable(); renderRight();
+    return;
+  }
+  const tab = e.target.closest('[data-tab]');
+  if (tab) { state.detailTab = tab.dataset.tab; renderRight(); return; }
+
+  const cf = e.target.closest('[data-clearfilter]');
+  if (cf) {
+    const k = cf.dataset.clearfilter;
+    if (k === 'q') { state.q = ''; document.getElementById('q').value = ''; }
+    else state[k] = 'all';
+    syncSegs(); renderTable(); renderLeft(); return;
+  }
+  if (e.target.closest('#clearFromRail')) { document.getElementById('clearFilters').click(); return; }
+  if (e.target.closest('#closeRight')) { state.rightOpen = false;
+    document.getElementById('railRight').classList.add('closed'); return; }
+  if (e.target.closest('#closeLeft')) { state.leftOpen = false;
+    document.getElementById('railLeft').classList.add('closed'); return; }
+  if (e.target.closest('#lineage') || e.target.closest('#allTrades')) {
+    toast('Prototype only — this would deep-link into the lineage / blotter view.'); return;
+  }
+});
+
+/* sorting */
+tablescroll.addEventListener('click', e => {
+  const th = e.target.closest('[data-sort]');
+  if (!th) return;
+  const id = th.dataset.sort;
+  if (state.sort.id !== id)      state.sort = { id, dir: 'desc' };
+  else if (state.sort.dir === 'desc') state.sort.dir = 'asc';
+  else if (state.sort.dir === 'asc')  state.sort = { id: null, dir: null };
+  renderTable();
+});
+
+/* keyboard */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  const rows = filtered();
+  if (!rows.length) return;
+  const i = rows.findIndex(r => r.id === state.selectedId);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const next = e.key === 'ArrowDown' ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1);
+    state.selectedId = rows[i === -1 ? 0 : next].id;
+    renderTable(); renderRight();
+    document.querySelector('tr.sel')?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Escape') {
+    state.selectedId = null; renderTable(); renderRight();
+  }
+});
+
+function syncSegs() {
+  document.querySelectorAll('#regionSeg button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.region === state.region)));
+  document.querySelectorAll('#densitySeg button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.d === state.density)));
+}
+
+/* =====================================================================
+   BOOT
+   ===================================================================== */
+syncSegs();
+renderTable();
+renderLeft();
+renderRight();
+renderColsPop();
+renderDateBtn();
+renderDatePop();
+</script>
+</body>
+</html>

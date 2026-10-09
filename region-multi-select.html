@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Region multi-select — prototype</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#fff; --ink:#111827; --muted:#6b7280; --line:#e6e8ec;
+    --accent:#2563eb; --accent-soft:#eff5ff; --accent-line:#bfdbfe;
+    --warn:#b45309; --warn-soft:#fffbeb; --warn-line:#fde68a;
+    --hover:#f3f4f6; --mark:#fff2b0;
+    --radius:12px;
+    --shadow:0 12px 32px rgba(15,23,42,.14), 0 2px 6px rgba(15,23,42,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0a0e1a; --panel:#131a2c; --ink:#e5e9f0; --muted:#94a3b8; --line:#26314c;
+      --accent:#60a5fa; --accent-soft:#1b2740; --accent-line:#2f4a76;
+      --warn:#fbbf24; --warn-soft:#2a2210; --warn-line:#5c4a12;
+      --hover:#1b2437; --mark:#5c4a12;
+      --shadow:0 14px 40px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{max-width:1080px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0 0 32px;font-size:13px}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;align-items:start}
+  @media (max-width:880px){.layout{grid-template-columns:minmax(0,1fr)}}
+
+  .label{display:block;font-size:12px;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+
+  /* ---------- component ---------- */
+  .field{position:relative;max-width:420px}
+  .trigger{
+    display:flex;align-items:center;gap:10px;width:100%;
+    padding:11px 12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);cursor:pointer;text-align:left;color:inherit;
+    font:inherit;transition:border-color .15s,box-shadow .15s;
+  }
+  .trigger:hover{border-color:var(--accent-line)}
+  .trigger[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .trigger.empty{border-color:var(--warn-line);background:var(--warn-soft)}
+  .trigger .chev{margin-left:auto;color:var(--muted);transition:transform .18s;flex:none}
+  .trigger[aria-expanded="true"] .chev{transform:rotate(180deg)}
+  .summary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .summary.placeholder{color:var(--muted)}
+  .badge{
+    flex:none;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;
+    background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line);
+  }
+  .trigger.empty .badge{background:transparent;color:var(--warn);border-color:var(--warn-line)}
+
+  .popover{
+    position:absolute;z-index:30;top:calc(100% + 8px);left:0;width:440px;max-width:100%;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);overflow:hidden;
+    animation:pop .12s ease-out;
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+  .searchwrap{display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid var(--line)}
+  .searchwrap svg{flex:none;color:var(--muted)}
+  .search{flex:1;border:0;outline:0;background:transparent;color:inherit;font:inherit}
+  .search::placeholder{color:var(--muted)}
+  .kbd{font:11px var(--mono);color:var(--muted);border:1px solid var(--line);
+    border-radius:5px;padding:1px 5px;background:var(--bg)}
+
+  .list{max-height:340px;overflow-y:auto;padding:6px}
+  .list:focus{outline:none}
+
+  .row{
+    display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:9px;
+    cursor:pointer;user-select:none;position:relative;
+  }
+  .row:hover{background:var(--hover)}
+  .row.active{background:var(--hover);box-shadow:inset 0 0 0 1px var(--line)}
+  .row.lvl-global{padding-left:9px}
+  .row.lvl-region{padding-left:26px}
+  .row.lvl-country{padding-left:48px}
+  .row.lvl-region .name{font-weight:600}
+  .row.ghost{opacity:.75}
+
+  .twist{width:14px;flex:none;color:var(--muted);font-size:10px;
+    display:grid;place-items:center;transition:transform .15s}
+  .twist.open{transform:rotate(90deg)}
+  .twist.leaf{visibility:hidden}
+
+  /* tri-state box */
+  .box{
+    width:17px;height:17px;flex:none;border-radius:5px;border:1.5px solid #c4c9d4;
+    background:var(--panel);display:grid;place-items:center;transition:.12s;
+  }
+  @media (prefers-color-scheme: dark){.box{border-color:#4b5776}}
+  .row:hover .box{border-color:var(--accent)}
+  .box[data-s="on"]{background:var(--accent);border-color:var(--accent)}
+  .box[data-s="mixed"]{background:var(--accent);border-color:var(--accent)}
+  .box[data-s="on"]::after{content:"";width:9px;height:5px;border-left:2px solid #fff;
+    border-bottom:2px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+  .box[data-s="mixed"]::after{content:"";width:9px;height:2px;background:#fff;border-radius:2px}
+
+  .flag{font-size:15px;line-height:1;flex:none;width:18px;text-align:center}
+  .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .iso{font:11px var(--mono);color:var(--muted);flex:none}
+  .aka{font-size:11px;color:var(--muted);flex:none}
+  .crumb{font-size:11px;color:var(--muted);flex:none}
+  mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 1px}
+  .dot{width:6px;height:6px;border-radius:50%;flex:none}
+  .dot.east{background:#f59e0b}.dot.west{background:#8b5cf6}
+
+  .empty-state{padding:22px 12px;text-align:center;color:var(--muted);font-size:13px}
+
+  .footer{
+    display:flex;align-items:center;gap:8px;row-gap:7px;flex-wrap:wrap;padding:9px 11px;
+    border-top:1px solid var(--line);background:var(--bg);font-size:12px;color:var(--muted);
+  }
+  .btn{
+    font:inherit;font-size:12px;padding:5px 10px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  }
+  .btn:hover{border-color:var(--accent-line);color:var(--accent)}
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn:disabled:hover{border-color:var(--line);color:var(--ink)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.07);color:#fff}
+  .spacer{margin-left:auto}
+
+  /* ---------- inspector ---------- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:16px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px}
+  pre{margin:0;font:12px/1.6 var(--mono);white-space:pre-wrap;word-break:break-word}
+  .rules{margin:0;padding-left:16px;font-size:12.5px;color:var(--muted)}
+  .rules li{margin-bottom:7px}
+  .rules b{color:var(--ink);font-weight:600}
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>Region multi-select</h1>
+  <p class="sub">Fuzzy, 3-level (Global › East / West › countries), tri-state cascade. Click the field, then try <b>jp</b>, <b>uk</b>, <b>asia</b>, <b>usa</b>, or <b>united</b>.</p>
+
+  <div class="layout">
+    <div>
+      <span class="label">Region</span>
+      <div class="field" id="field">
+        <div id="triggerHost"></div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="card">
+        <h2>Filter emitted to API</h2>
+        <pre id="payload"></pre>
+      </div>
+      <div class="card">
+        <h2>Interaction rules</h2>
+        <ul class="rules">
+          <li><b>Leaves are the truth.</b> Only country codes are stored; region &amp; Global state are derived. No contradictory parents.</li>
+          <li><b>Cascade both ways.</b> Ticking <b>East</b> ticks its countries; ticking the last country auto-turns East to full; unticking one turns it mixed.</li>
+          <li><b>"Global except X"</b> is preserved: unchecking a country under Global materialises the list minus that country.</li>
+          <li><b>Empty ≠ all.</b> No selection shows an amber warning instead of silently meaning "everything".</li>
+          <li><b>Search matches aliases</b> (UK→GB, APAC→East, USA→US) and keeps ancestors visible for context.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<script>
+/* =====================================================================
+   DATA MODEL
+   Only the region → country tree is config. Swap CONFIG to re-point the
+   control at a different hierarchy (Site, Legal Entity, ...) unchanged.
+   ===================================================================== */
+const CONFIG = {
+  root: { label: 'Global', aliases: ['all', 'worldwide', 'everywhere', 'any'] },
+  regions: [
+    {
+      id: 'east', label: 'East', short: 'East',
+      aliases: ['apac', 'asia', 'asia pacific', 'emerging', 'east'],
+      countries: [
+        { iso:'CN', name:'China',           aliases:['prc','mainland','中国'] },
+        { iso:'HK', name:'Hong Kong',       aliases:['hk','hk sar'] },
+        { iso:'JP', name:'Japan',           aliases:['nippon','日本'] },
+        { iso:'KR', name:'South Korea',     aliases:['korea','republic of korea','韩国'] },
+        { iso:'SG', name:'Singapore',       aliases:['sg'] },
+        { iso:'TW', name:'Taiwan',          aliases:['taipei'] },
+        { iso:'IN', name:'India',           aliases:['bharat'] },
+        { iso:'AU', name:'Australia',       aliases:['aus'] },
+        { iso:'TH', name:'Thailand',        aliases:['siam'] },
+        { iso:'MY', name:'Malaysia',        aliases:['malaya'] },
+        { iso:'ID', name:'Indonesia',       aliases:[] },
+        { iso:'VN', name:'Vietnam',         aliases:['viet nam'] },
+      ],
+    },
+    {
+      id: 'west', label: 'West', short: 'West',
+      aliases: ['emea', 'americas', 'europe', 'western', 'latam'],
+      countries: [
+        { iso:'US', name:'United States',        aliases:['usa','us','america','united states of america'] },
+        { iso:'CA', name:'Canada',               aliases:[] },
+        { iso:'GB', name:'United Kingdom',       aliases:['uk','britain','great britain','england'] },
+        { iso:'DE', name:'Germany',              aliases:['deutschland'] },
+        { iso:'FR', name:'France',               aliases:[] },
+        { iso:'NL', name:'Netherlands',          aliases:['holland'] },
+        { iso:'CH', name:'Switzerland',          aliases:['swiss'] },
+        { iso:'IE', name:'Ireland',              aliases:[] },
+        { iso:'LU', name:'Luxembourg',           aliases:[] },
+        { iso:'ES', name:'Spain',                aliases:['espana'] },
+        { iso:'AE', name:'United Arab Emirates', aliases:['uae','dubai','abu dhabi'] },
+        { iso:'SA', name:'Saudi Arabia',         aliases:['ksa','riyadh'] },
+      ],
+    },
+  ],
+};
+
+const ALL_ISOS      = CONFIG.regions.flatMap(r => r.countries.map(c => c.iso));
+const COUNTRY_BY_ISO = Object.fromEntries(CONFIG.regions.flatMap(r => r.countries.map(c => [c.iso, c])));
+const REGION_BY_ISO  = Object.fromEntries(CONFIG.regions.flatMap(r => r.countries.map(c => [c.iso, r])));
+const flag = iso => /^[A-Z]{2}$/.test(iso)
+  ? iso.replace(/./g, ch => String.fromCodePoint(127397 + ch.charCodeAt(0))) : '';
+
+/* =====================================================================
+   STATE  —  single source of truth
+   all === true  → Global (no filter)
+   all === false → `selected` is the authoritative set of country codes
+   ===================================================================== */
+const state = { all: true, selected: new Set() };
+let query = '';
+const expanded = new Set(['east', 'west']);   // which regions are open in browse mode
+let activeIndex = 0;
+let lastRows = [];
+let open = false;
+
+const isCountryOn = iso => state.all || state.selected.has(iso);
+
+function normalize() {
+  if (!state.all && state.selected.size === ALL_ISOS.length) {
+    state.all = true; state.selected = new Set();          // became "everything" → collapse to Global
+  }
+}
+function ensureList() {                                    // leave Global mode lazily
+  if (state.all) { state.all = false; state.selected = new Set(ALL_ISOS); }
+  return state.selected;
+}
+function nodeState(isos) {
+  const on = isos.reduce((n, iso) => n + (isCountryOn(iso) ? 1 : 0), 0);
+  return on === 0 ? 'off' : on === isos.length ? 'on' : 'mixed';
+}
+function toggleCountry(iso) {
+  if (state.all) { const s = ensureList(); s.delete(iso); }        // Global → all except this one
+  else if (state.selected.has(iso)) state.selected.delete(iso);
+  else state.selected.add(iso);
+  normalize();
+}
+function toggleRegion(region) {
+  const isos = region.countries.map(c => c.iso);
+  if (nodeState(isos) === 'on') { const s = ensureList(); isos.forEach(i => s.delete(i)); }
+  else                          { const s = ensureList(); isos.forEach(i => s.add(i));  }
+  normalize();
+}
+function toggleGlobal() {
+  if (nodeState(ALL_ISOS) === 'on') { state.all = false; state.selected = new Set(); }
+  else                              { state.all = true;  state.selected = new Set(); }
+}
+function expandAll()   { CONFIG.regions.forEach(r => expanded.add(r.id)); }
+function collapseAll() { expanded.clear(); }
+const isAllExpanded = () => CONFIG.regions.every(r => expanded.has(r.id));
+
+/* ---------- summary shown in the trigger ---------- */
+function summarize() {
+  if (state.all) return 'Global';
+  const sel = state.selected;
+  if (sel.size === 0) return 'No region';
+  if (sel.size <= 3) return [...sel].sort().map(i => COUNTRY_BY_ISO[i].name).join(', ');
+  const parts = [];
+  for (const r of CONFIG.regions) {
+    const on = r.countries.filter(c => sel.has(c.iso)).length;
+    if (!on) continue;
+    parts.push(on === r.countries.length ? r.label : `${r.label} (${on}/${r.countries.length})`);
+  }
+  return parts.join(' + ');
+}
+const countSelected = () => state.all ? ALL_ISOS.length : state.selected.size;
+
+/* =====================================================================
+   FUZZY MATCH  —  exact > prefix > word-boundary > substring > subsequence
+   Returns { score, idx } where idx are the char positions to highlight.
+   ===================================================================== */
+const range = (start, len) => Array.from({ length: len }, (_, k) => start + k);
+
+function fuzzy(q, text) {
+  const t = text.toLowerCase();
+  if (t === q) return { score: 1000, idx: range(0, q.length) };
+  const at = t.indexOf(q);
+  if (at === 0) return { score: 900, idx: range(0, q.length) };
+  if (at > 0) {
+    const boundary = /[^a-z0-9]/.test(t[at - 1]);
+    return { score: boundary ? 800 : 600, idx: range(at, q.length) };
+  }
+  // subsequence (fzf-style): "uk" → "United Kingdom"? no — but "us" → "United States" yes
+  const idx = []; let qi = 0;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) { idx.push(ti); qi++; }
+  }
+  if (qi < q.length) return null;
+  const span = idx[idx.length - 1] - idx[0];
+  return { score: Math.max(1, 320 - span * 3 - idx[0]), idx };
+}
+function best(q, candidates) {                 // candidates: [{text, field}]
+  let win = null;
+  for (const c of candidates) {
+    const m = fuzzy(q, c.text);
+    if (m && (!win || m.score > win.score)) win = { ...m, field: c.field, text: c.text };
+  }
+  return win;
+}
+function matchRegion(q, r) {
+  return best(q, [{ text: r.label, field: 'name' }, ...r.aliases.map(a => ({ text: a, field: 'alias' }))]);
+}
+function matchCountry(q, c) {
+  return best(q, [
+    { text: c.name, field: 'name' },
+    { text: c.iso,  field: 'iso'  },
+    ...c.aliases.map(a => ({ text: a, field: 'alias' })),
+  ]);
+}
+function matchRoot(q) {
+  return best(q, [{ text: CONFIG.root.label, field: 'name' },
+                  ...CONFIG.root.aliases.map(a => ({ text: a, field: 'alias' }))]);
+}
+
+/* =====================================================================
+   ROW MODEL  — what is actually rendered right now
+   ===================================================================== */
+function visibleRows() {
+  const q = query.trim().toLowerCase();
+  const rows = [];
+  if (!q) {
+    rows.push({ kind: 'global' });
+    for (const r of CONFIG.regions) {
+      rows.push({ kind: 'region', region: r });
+      if (expanded.has(r.id))
+        for (const c of r.countries) rows.push({ kind: 'country', country: c, region: r });
+    }
+    return rows;
+  }
+  const g = matchRoot(q);
+  if (g) rows.push({ kind: 'global', match: g });
+  for (const r of CONFIG.regions) {
+    const rm = matchRegion(q, r);
+    const kids = r.countries.map(c => ({ c, m: matchCountry(q, c) })).filter(x => x.m)
+                          .sort((a, b) => b.m.score - a.m.score);
+    if (!rm && kids.length === 0) continue;
+    rows.push({ kind: 'region', region: r, match: rm, ghost: !rm });
+    for (const { c, m } of kids) rows.push({ kind: 'country', country: c, region: r, match: m });
+  }
+  return rows;
+}
+
+/* =====================================================================
+   RENDERING
+   ===================================================================== */
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[ch]));
+function hl(text, idx) {
+  if (!idx || !idx.length) return esc(text);
+  const set = new Set(idx);
+  let out = '', on = false;
+  for (let i = 0; i < text.length; i++) {
+    const m = set.has(i);
+    if (m && !on) { out += '<mark>'; on = true; }
+    if (!m && on) { out += '</mark>'; on = false; }
+    out += esc(text[i]);
+  }
+  return out + (on ? '</mark>' : '');
+}
+
+const ICON_SEARCH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.2-3.2"/></svg>';
+const ICON_CHEV   = '<svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+
+const triggerHost = document.getElementById('triggerHost');
+const payloadEl   = document.getElementById('payload');
+
+function renderTrigger() {
+  const empty = !state.all && state.selected.size === 0;
+  triggerHost.innerHTML = `
+    <button class="trigger${empty ? ' empty' : ''}" id="trigger"
+            aria-haspopup="dialog" aria-expanded="${open}">
+      <span class="summary${empty ? ' placeholder' : ''}">${esc(summarize())}</span>
+      <span class="badge">${countSelected()}</span>
+      ${ICON_CHEV}
+    </button>`;
+  document.getElementById('trigger').onclick = e => { e.stopPropagation(); open = !open; render(); };
+}
+
+function rowHTML(row, i) {
+  const isActive = i === activeIndex;
+  if (row.kind === 'global') {
+    const s = nodeState(ALL_ISOS);
+    const label = query ? hl(CONFIG.root.label, row.match && row.match.field === 'name' ? row.match.idx : null) : 'Global';
+    return `<div class="row lvl-global${isActive ? ' active' : ''}" role="treeitem" aria-level="1"
+                 aria-checked="${s === 'off' ? 'false' : s === 'on' ? 'true' : 'mixed'}" data-i="${i}">
+      <span class="twist leaf">▸</span>
+      <span class="box" data-s="${s}"></span>
+      <span class="name">${label}</span>
+      <span class="crumb">${ALL_ISOS.length} countries</span>
+    </div>`;
+  }
+  if (row.kind === 'region') {
+    const r = row.region;
+    const isos = r.countries.map(c => c.iso);
+    const s = nodeState(isos);
+    const isOpen = query ? true : expanded.has(r.id);
+    const name = query && row.match && row.match.field === 'name' ? hl(r.label, row.match.idx) : esc(r.label);
+    const aka  = query && row.match && row.match.field === 'alias'
+      ? `<span class="aka">· ${hl(row.match.text, row.match.idx)}</span>` : '';
+    return `<div class="row lvl-region${isActive ? ' active' : ''}${row.ghost ? ' ghost' : ''}"
+                 role="treeitem" aria-level="2" aria-expanded="${isOpen}"
+                 aria-checked="${s === 'off' ? 'false' : s === 'on' ? 'true' : 'mixed'}" data-i="${i}">
+      <span class="twist ${isOpen ? 'open' : ''}">▸</span>
+      <span class="box" data-s="${s}"></span>
+      <span class="dot ${r.id}"></span>
+      <span class="name">${name}</span>${aka}
+      <span class="crumb">${r.countries.filter(c => isCountryOn(c.iso)).length}/${r.countries.length}</span>
+    </div>`;
+  }
+  // country
+  const c = row.country, r = row.region, on = isCountryOn(c.iso);
+  let name = esc(c.name), aka = '';
+  if (query && row.match) {
+    if (row.match.field === 'name')  name = hl(c.name, row.match.idx);
+    if (row.match.field === 'iso')   name = esc(c.name);
+    if (row.match.field === 'alias') aka = `<span class="aka">· ${hl(row.match.text, row.match.idx)}</span>`;
+  }
+  const showCrumb = !!query;
+  return `<div class="row lvl-country${isActive ? ' active' : ''}" role="treeitem" aria-level="3"
+               aria-checked="${on}" data-i="${i}">
+      <span class="twist leaf">▸</span>
+      <span class="box" data-s="${on ? 'on' : 'off'}"></span>
+      <span class="flag">${flag(c.iso)}</span>
+      <span class="name">${name}</span>${aka}
+      ${showCrumb ? `<span class="crumb">${esc(r.label)}</span>` : ''}
+      <span class="iso">${c.iso}</span>
+    </div>`;
+}
+
+function renderList() {
+  lastRows = visibleRows();
+  if (activeIndex >= lastRows.length) activeIndex = Math.max(0, lastRows.length - 1);
+  if (activeIndex < 0) activeIndex = 0;
+  if (!lastRows.length) return `<div class="empty-state">No region matches “${esc(query)}”.</div>`;
+  return lastRows.map(rowHTML).join('');
+}
+
+function renderFooter() {
+  const q = query.trim();
+  const matching = q ? lastRows.filter(r => r.kind !== 'region' || !r.ghost).length : 0;
+  // Expand/collapse only makes sense in browse mode — while searching, matches are auto-expanded.
+  const tools = q
+    ? `<button class="btn" data-act="select-matching">Select ${matching} matching</button>`
+    : `<button class="btn" data-act="expand-all"   ${isAllExpanded() ? 'disabled' : ''}
+               title="Expand every region">Expand all</button>
+       <button class="btn" data-act="collapse-all" ${expanded.size === 0 ? 'disabled' : ''}
+               title="Collapse every region">Collapse all</button>`;
+  return `
+    <div class="footer">
+      ${tools}
+      <span class="spacer"></span>
+      <span class="count" title="Countries passing the current filter">${countSelected()} of ${ALL_ISOS.length} countries</span>
+      <button class="btn" data-act="clear">Clear</button>
+      <button class="btn primary" data-act="done">Done</button>
+    </div>`;
+}
+
+function render() {
+  renderTrigger();
+  const host = document.getElementById('field');
+  host.querySelector('.popover')?.remove();
+  if (open) {
+    const pop = document.createElement('div');
+    pop.className = 'popover'; pop.setAttribute('role', 'dialog');
+    pop.innerHTML = `
+      <div class="searchwrap">${ICON_SEARCH}
+        <input class="search" id="search" placeholder="Search regions, countries, or codes…"
+               autocomplete="off" spellcheck="false" value="${esc(query)}">
+        <span class="kbd">esc</span>
+      </div>
+      <div class="list" id="list" role="tree" aria-multiselectable="true" tabindex="-1">${renderList()}</div>
+      ${renderFooter()}`;
+    host.appendChild(pop);
+    pop.addEventListener('mousedown', e => e.stopPropagation());
+
+    const search = pop.querySelector('#search');
+    search.oninput = () => { query = search.value; activeIndex = 0; refresh(); };
+    search.focus();
+    search.setSelectionRange(search.value.length, search.value.length);
+    search.onkeydown = onKey;
+
+    pop.querySelector('#list').onclick = onListClick;
+    pop.querySelector('.footer').onclick = onFooterClick;
+  }
+  renderPayload();
+}
+
+function refresh() {           // re-render list + footer without losing input focus
+  const list = document.getElementById('list');
+  const footer = document.querySelector('.popover .footer');
+  if (!list) { render(); return; }
+  list.innerHTML = renderList();
+  footer.outerHTML = renderFooter();
+  document.querySelector('.popover .footer').onclick = onFooterClick;
+  // clicking a row / footer button steals focus, so hand it back to the search box
+  document.getElementById('search')?.focus({ preventScroll: true });
+  renderTrigger(); renderPayload();
+}
+
+/* =====================================================================
+   EVENTS
+   ===================================================================== */
+function onListClick(e) {
+  const row = e.target.closest('.row');
+  if (!row) return;
+  const i = +row.dataset.i;
+  activeIndex = i;
+  const hit = lastRows[i];
+  if (!hit) return;
+  if (hit.kind === 'global') toggleGlobal();
+  else if (hit.kind === 'region') {
+    if (e.target.closest('.twist') && !query) {
+      expanded.has(hit.region.id) ? expanded.delete(hit.region.id) : expanded.add(hit.region.id);
+    } else toggleRegion(hit.region);
+  } else toggleCountry(hit.country.iso);
+  refresh();
+}
+function onFooterClick(e) {
+  const act = e.target.dataset.act;
+  if (act === 'done')      { open = false; render(); }
+  if (act === 'clear')     { state.all = false; state.selected = new Set(); refresh(); }
+  if (act === 'expand-all')   { expandAll();   activeIndex = 0; refresh(); }
+  if (act === 'collapse-all') { collapseAll(); activeIndex = 0; refresh(); }
+  if (act === 'select-matching') {
+    for (const r of lastRows) {
+      if (r.kind === 'country' && (!query || !!r.match)) state.selected.add(r.country.iso);
+      if (r.kind === 'region' && !r.ghost) r.region.countries.forEach(c => state.selected.add(c.iso));
+      if (r.kind === 'global') state.selected = new Set(ALL_ISOS);
+    }
+    state.all = false; normalize(); refresh();
+  }
+}
+function onKey(e) {
+  const n = lastRows.length;
+  if (e.key === 'Escape')  { open = false; render(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); activeIndex = n ? (activeIndex + 1) % n : 0; refresh(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); activeIndex = n ? (activeIndex - 1 + n) % n : 0; refresh(); }
+  else if (e.key === 'Home') { e.preventDefault(); activeIndex = 0; refresh(); }
+  else if (e.key === 'End')  { e.preventDefault(); activeIndex = Math.max(0, n - 1); refresh(); }
+  else if (e.key === 'ArrowRight') {
+    const r = lastRows[activeIndex];
+    if (r?.kind === 'region' && !query) { e.preventDefault(); expanded.add(r.region.id); refresh(); }
+  } else if (e.key === 'ArrowLeft') {
+    const r = lastRows[activeIndex];
+    if (r?.kind === 'region' && !query) { e.preventDefault(); expanded.delete(r.region.id); refresh(); }
+    else if (query) { e.preventDefault(); query = ''; document.getElementById('search').value = ''; refresh(); }
+  } else if (e.key === ' ' || e.key === 'Enter') {
+    const r = lastRows[activeIndex];
+    if (!r) return;
+    e.preventDefault();
+    if (r.kind === 'global') toggleGlobal();
+    else if (r.kind === 'region') toggleRegion(r.region);
+    else toggleCountry(r.country.iso);
+    refresh();
+  } else if (e.key === 'Backspace' && e.target.value === '') {
+    if (!state.all && state.selected.size) {
+      const last = [...state.selected].pop();
+      state.selected.delete(last); e.preventDefault(); refresh();
+    }
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    for (const r of lastRows) if (r.kind === 'country') state.selected.add(r.country.iso);
+    state.all = false; normalize(); refresh();
+  }
+}
+document.addEventListener('mousedown', e => {
+  if (open && !document.getElementById('field').contains(e.target)) { open = false; render(); }
+});
+
+/* =====================================================================
+   INSPECTOR — exactly what the backend would receive
+   ===================================================================== */
+function renderPayload() {
+  const payload = state.all
+    ? { dimension: 'region', op: 'eq', value: 'GLOBAL' }
+    : { dimension: 'region', op: 'in', value: [...state.selected].sort() };
+  payloadEl.textContent = JSON.stringify(payload, null, 2);
+}
+
+/* boot */
+render();
+</script>
+</body>
+</html>
